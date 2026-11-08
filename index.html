@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Gitz Store — quality products, better living." />
+    <title>Gitz Store | Quality products, better living</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="announcement"><span>Free delivery on orders over KSh 5,000</span><span class="announcement-dot">•</span><span>Customer care: 0799934199</span><span class="announcement-dot">•</span><span>Secure checkout</span></div>
+    <header class="site-header">
+      <a class="brand" href="#" data-view="store" aria-label="Gitz Store home">
+        <img src="Gitz store logo.jpeg" alt="Gitz Store logo" />
+        <span><b>GITZ</b><small>STORE</small></span>
+      </a>
+      <nav class="main-nav" aria-label="Primary navigation">
+        <button class="nav-link active" data-view="store">Shop</button>
+        <button class="nav-link" data-view="admin">Admin dashboard</button>
+      </nav>
+      <button class="cart-button" id="cartButton" aria-label="Open shopping cart"><span class="cart-icon">🛒</span><span>Cart</span><b id="cartCount">0</b></button>
+    </header>
+
+    <main>
+      <section id="storeView" class="view">
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">Everyday essentials, elevated</p>
+            <h1>Better choices<br /><em>for better living.</em></h1>
+            <p class="hero-description">A thoughtful collection of pantry staples, home goods, and personal care favorites — delivered to your door.</p>
+            <button class="primary-button" data-scroll-products>Explore products <span>↘</span></button>
+          </div>
+          <div class="hero-art">
+            <div class="hero-blob"></div>
+            <div class="hero-card hero-card-main"><span class="hero-card-icon">🥬</span><strong>Fresh<br />every day</strong></div>
+            <div class="hero-card hero-card-small"><span>✦</span><strong>Good for<br />your home</strong></div>
+            <div class="hero-sticker">GITZ<br /><small>GOOD</small></div>
+          </div>
+        </section>
+
+        <section class="shop-section" id="productsSection">
+          <div class="section-heading">
+            <div><p class="eyebrow">The Gitz edit</p><h2>Shop our favorites</h2></div>
+            <div class="shop-controls">
+              <label class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="Search products..." /></label>
+              <select id="categoryFilter" aria-label="Filter by category"><option value="all">All categories</option><option value="Pantry">Pantry</option><option value="Beverages">Beverages</option><option value="Home">Home</option><option value="Personal care">Personal care</option><option value="Snacks">Snacks</option></select>
+            </div>
+          </div>
+          <div id="productGrid" class="product-grid"></div>
+          <div id="emptyProducts" class="empty-state hidden"><span>✦</span><h3>No products found</h3><p>Try a different search or category.</p></div>
+        </section>
+        <section class="values-strip"><div><span>✦</span><p><b>Curated quality</b><small>Only products we love</small></p></div><div><span>♧</span><p><b>Easy on the planet</b><small>Thoughtful everyday choices</small></p></div><div><span>♡</span><p><b>Made for you</b><small>Conveniently delivered</small></p></div></section>
+      </section>
+
+      <section id="adminView" class="view hidden">
+        <section id="adminLogin" class="admin-login"><div class="admin-login-art"><span>✦</span><strong>Gitz Store<br /><em>control room</em></strong></div><div class="admin-login-form"><p class="eyebrow">Private access</p><h1>Welcome back.</h1><p>Sign in to manage your products, stock, and orders.</p><form id="adminLoginForm"><label>Username<input name="username" autocomplete="username" required placeholder="Admin username" /></label><label>Password<input name="password" type="password" autocomplete="current-password" required placeholder="Your password" /></label><button class="primary-button full-width" type="submit">Sign in <span>→</span></button><p id="loginError" class="login-error hidden">The username or password is incorrect.</p></form></div></section>
+        <div id="adminDashboard" class="hidden"><section class="admin-hero"><div><p class="eyebrow">Store management</p><h1>Your store, <em>your rules.</em></h1><p>Manage your Gitz Store catalog and keep your customers stocked with the good stuff.</p></div><div class="admin-actions"><span class="customer-care">Customer care <b>0799934199</b></span><button class="secondary-button" id="logoutButton">Log out</button><button class="primary-button" id="addProductButton">＋ Add product</button></div></section>
+        <section class="admin-content">
+          <div class="admin-stats"><div><small>Total products</small><strong id="totalProducts">0</strong><span>in your catalog</span></div><div><small>Orders received</small><strong id="totalOrders">0</strong><span>all time</span></div><div><small>Catalog value</small><strong id="catalogValue">KSh 0</strong><span>current stock</span></div></div>
+          <div class="admin-table-card"><div class="table-heading"><div><p class="eyebrow">Product catalog</p><h2>Manage products</h2></div><span class="live-pill"><i></i> Store is live</span></div><div class="table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th></th></tr></thead><tbody id="adminProductRows"></tbody></table></div><div id="emptyAdmin" class="empty-state hidden"><span>＋</span><h3>Your catalog is empty</h3><p>Add your first product to start selling.</p></div></div>
+          <div class="notifications-card"><div class="table-heading"><div><p class="eyebrow">Live order alerts</p><h2>Notifications <span id="notificationCount" class="notification-count">0</span></h2></div><button class="secondary-button" id="clearNotifications">Clear all</button></div><div id="orderNotifications" class="order-notifications"><p class="muted-copy">New orders will appear here.</p></div></div>
+        </section>
+        </div>
+      </section>
+    </main>
+
+    <footer><div class="footer-brand"><img src="Gitz store logo.jpeg" alt="" /><span>GITZ STORE</span></div><p>Quality products • Better living</p><p class="footer-care">Customer care: <b>0799934199</b></p><small>© 2026 Gitz Store</small></footer>
+
+    <div id="cartDrawer" class="drawer" aria-hidden="true"><div class="drawer-backdrop" data-close-cart></div><aside class="drawer-panel"><div class="drawer-header"><div><p class="eyebrow">Your selection</p><h2>Shopping cart <span id="drawerCount">0</span></h2></div><button class="icon-button" data-close-cart aria-label="Close cart">×</button></div><div id="cartItems" class="cart-items"></div><div id="cartEmpty" class="cart-empty"><span>🛒</span><h3>Your cart is waiting</h3><p>Add something good to get started.</p></div><div class="cart-summary"><div><span>Subtotal</span><strong id="cartTotal">KSh 0</strong></div><small>Taxes and delivery calculated at checkout</small><button class="primary-button full-width" id="checkoutButton">Checkout <span>→</span></button></div></aside></div>
+    <div id="productModal" class="modal hidden"><div class="modal-backdrop" data-close-modal></div><div class="modal-card"><div class="modal-heading"><div><p class="eyebrow">Catalog update</p><h2>Add a new product</h2></div><button class="icon-button" data-close-modal>×</button></div><form id="productForm"><label>Product name<input name="name" required placeholder="e.g. Organic Oat Granola" /></label><div class="form-row"><label>Category<select name="category"><option>Pantry</option><option>Beverages</option><option>Home</option><option>Personal care</option><option>Snacks</option></select></label><label>Price (KSh)<input name="price" type="number" step="1" min="1" required placeholder="1,200" /></label></div><div class="form-row"><label>Stock<input name="stock" type="number" min="0" step="1" required placeholder="25" /></label><label>Icon<input name="icon" maxlength="2" placeholder="✦" /></label></div><label>Product photo<input id="productImage" name="image" type="file" accept="image/*" /><small class="field-help">Upload a JPG, PNG, or WebP image from your device.</small><img id="imagePreview" class="image-preview hidden" alt="Product preview" /></label><label>Short description<textarea name="description" rows="3" placeholder="A short, helpful description..."></textarea></label><button class="primary-button full-width" type="submit">Add product <span>→</span></button></form></div></div>
+    <div id="checkoutModal" class="modal hidden"><div class="modal-backdrop" data-close-checkout></div><div class="modal-card checkout-card"><div class="modal-heading"><div><p class="eyebrow">Almost there</p><h2>Complete your order</h2></div><button class="icon-button" data-close-checkout>×</button></div><form id="checkoutForm"><label>Full name<input name="name" required placeholder="Your name" /></label><label>Email address<input name="email" type="email" required placeholder="you@example.com" /></label><label>Delivery address<input name="address" required placeholder="123 Market Street" /></label><div class="form-row"><label>City<input name="city" required placeholder="Your city" /></label><label>Postal code<input name="postal" required placeholder="00100" /></label></div><label>M-Pesa phone number<input name="phone" type="tel" inputmode="tel" pattern="(\\+254|0)7\\d{8}" required placeholder="07XXXXXXXX" />    <small class="field-help">Your number is prepared for an M-Pesa prompt. Never share your PIN with anyone. A live Daraja connection is required to send the actual prompt.</small></label><div class="checkout-total"><span>Order total</span><strong id="checkoutTotal">KSh 0</strong></div><button class="primary-button full-width" type="submit">Request M-Pesa prompt <span>→</span></button></form></div></div>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
