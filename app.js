@@ -21,9 +21,7 @@ let orders = JSON.parse(localStorage.getItem("gitz-orders") || "[]");
 let notifications = JSON.parse(localStorage.getItem("gitz-notifications") || "[]");
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `KSh ${Number(value).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
-const ADMIN_USERNAME = "admin";
-const ADMIN_PASSWORD = "Gitz@2026";
-let adminAuthenticated = sessionStorage.getItem("gitz-admin-auth") === "true";
+let adminAuthenticated = false;
 const save = () => { localStorage.setItem("gitz-products", JSON.stringify(products)); localStorage.setItem("gitz-cart", JSON.stringify(cart)); };
 const saveNotifications = () => localStorage.setItem("gitz-notifications", JSON.stringify(notifications));
 const productVisual = (product, className = "") => product.image ? `<img class="${className}" src="${product.image}" alt="${product.name}" />` : (product.icon || "✦");
@@ -35,11 +33,30 @@ function renderProducts() {
   $("#productGrid").innerHTML = visible.map((p) => `<article class="product-card"><div class="product-image">${productVisual(p, "product-photo")}</div><span class="stock-label ${p.stock < 10 ? "low" : ""}">${p.stock === 0 ? "Sold out" : p.stock < 10 ? `${p.stock} left` : "In stock"}</span><div class="product-info"><span class="product-category">${p.category}</span><h3 title="${p.name}">${p.name}</h3><p>${p.description || "A thoughtful everyday essential."}</p><div class="product-bottom"><strong class="price">${money(p.price)}</strong><button class="add-button" data-add="${p.id}" ${p.stock === 0 ? "disabled" : ""} aria-label="Add ${p.name} to cart">+</button></div></div></article>`).join("");
   $("#emptyProducts").classList.toggle("hidden", visible.length > 0);
 }
+const productById = (id) => products.find((product) => String(product.id) === String(id));
+async function refreshFromBackend() {
+  try {
+    const remoteProducts = await loadRemoteProducts();
+    if (remoteProducts.length) products = remoteProducts;
+    try {
+      orders = await loadRemoteOrders();
+      notifications = orders.map((order) => ({ id: order.id, total: order.total, customer: order.customer, date: order.date }));
+    } catch (orderError) {
+      console.error("Could not load shared orders.", orderError);
+    }
+    save();
+    saveNotifications();
+    renderProducts(); renderAdminAccess(); renderCart();
+  } catch (error) {
+    console.error("Could not load the shared store data.", error);
+    showToast("Shared store data is unavailable. Showing cached products.");
+  }
+}
 function renderAdmin() {
   $("#totalProducts").textContent = products.length;
   $("#totalOrders").textContent = orders.length;
   $("#catalogValue").textContent = money(products.reduce((sum, p) => sum + p.price * p.stock, 0));
-  $("#adminProductRows").innerHTML = products.map((p) => `<tr><td><div class="table-product"><span class="table-product-icon">${productVisual(p, "table-product-photo")}</span>${p.name}</div></td><td>${p.category}</td><td>${money(p.price)}</td><td>${p.stock}</td><td><button class="delete-button" data-delete="${p.id}">Remove</button></td></tr>`).join("");
+  $("#adminProductRows").innerHTML = products.map((p) => `<tr><td><div class="table-product"><span class="table-product-icon">${productVisual(p, "table-product-photo")}</span>${p.name}</div></td><td>${p.category}</td><td>${money(p.price)}</td><td><div class="stock-editor"><input type="number" min="0" step="1" value="${p.stock}" data-stock="${p.id}" aria-label="Stock for ${p.name}" /><button class="save-stock-button" data-save-stock="${p.id}">Save</button></div></td><td><button class="delete-button" data-delete="${p.id}">Remove</button></td></tr>`).join("");
   $("#notificationCount").textContent = notifications.length;
   $("#orderNotifications").innerHTML = notifications.length ? notifications.map((notification) => `<div class="order-notification"><span class="notification-icon">🛍</span><div><strong>New order received</strong><p>${notification.customer} • ${money(notification.total)} via M-Pesa</p><small>${new Date(notification.date).toLocaleString("en-KE")}</small></div></div>`).join("") : '<p class="muted-copy">New orders will appear here.</p>';
   $("#emptyAdmin").classList.toggle("hidden", products.length > 0);
@@ -64,7 +81,7 @@ function closeDrawer() { $("#cartDrawer").classList.remove("open"); $("#cartDraw
 function openModal(id) { $(id).classList.remove("hidden"); }
 function closeModal(id) { $(id).classList.add("hidden"); }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view]");
   if (viewButton) {
     const view = viewButton.dataset.view;
@@ -74,24 +91,41 @@ document.addEventListener("click", (event) => {
   }
   const add = event.target.closest("[data-add]");
   if (add) {
-    const product = products.find((p) => p.id === Number(add.dataset.add));
-    const existing = cart.find((item) => item.id === product.id);
+    const product = productById(add.dataset.add);
+    if (!product) return;
+    const existing = cart.find((item) => String(item.id) === String(product.id));
     if (existing) { if (existing.quantity < product.stock) existing.quantity++; else return showToast("That’s all the stock we have."); }
     else cart.push({ ...product, quantity: 1 });
     save(); renderCart(); showToast(`${product.name} added to cart`);
   }
   const remove = event.target.closest("[data-delete]");
   if (remove) {
-    const product = products.find((p) => p.id === Number(remove.dataset.delete));
-    if (confirm(`Remove "${product.name}" from the catalog?`)) { products = products.filter((p) => p.id !== product.id); cart = cart.filter((item) => item.id !== product.id); save(); renderProducts(); renderAdmin(); renderCart(); showToast("Product removed"); }
+    const product = productById(remove.dataset.delete);
+    if (product && confirm(`Remove "${product.name}" from the catalog?`)) {
+      try { await deleteRemoteProduct(product.id); products = products.filter((p) => p.id !== product.id); cart = cart.filter((item) => item.id !== product.id); save(); renderProducts(); renderAdmin(); renderCart(); showToast("Product removed"); }
+      catch (error) { console.error("Product removal failed.", error); showToast("Could not remove the product."); }
+    }
+  }
+  const saveStock = event.target.closest("[data-save-stock]");
+  if (saveStock) {
+    const product = productById(saveStock.dataset.saveStock);
+    const input = document.querySelector(`[data-stock="${product.id}"]`);
+    const stock = Number(input.value);
+    if (!Number.isInteger(stock) || stock < 0) return showToast("Stock must be a whole number of 0 or more.");
+    try {
+      await updateRemoteProduct(product.id, { stock });
+      product.stock = stock;
+      cart = cart.map((item) => String(item.id) === String(product.id) ? { ...item, stock } : item).filter((item) => item.quantity <= item.stock);
+      save(); renderProducts(); renderAdmin(); renderCart(); showToast(`${product.name} stock updated`);
+    } catch (error) { console.error("Stock update failed.", error); showToast("Could not update stock."); }
   }
   const qty = event.target.closest("[data-qty]");
   if (qty) {
-    const item = cart.find((i) => i.id === Number(qty.dataset.qty)); const product = products.find((p) => p.id === item.id);
+    const item = cart.find((i) => String(i.id) === String(qty.dataset.qty)); const product = productById(qty.dataset.qty);
     item.quantity = Math.max(0, Math.min(product.stock, item.quantity + Number(qty.dataset.change))); cart = cart.filter((i) => i.quantity > 0); save(); renderCart();
   }
   const removeCart = event.target.closest("[data-remove-cart]");
-  if (removeCart) { cart = cart.filter((item) => item.id !== Number(removeCart.dataset.removeCart)); save(); renderCart(); }
+  if (removeCart) { cart = cart.filter((item) => String(item.id) !== String(removeCart.dataset.removeCart)); save(); renderCart(); }
   if (event.target.closest("[data-close-cart]")) closeDrawer();
   if (event.target.closest("[data-close-modal]")) closeModal("#productModal");
   if (event.target.closest("[data-close-checkout]")) closeModal("#checkoutModal");
@@ -99,22 +133,23 @@ document.addEventListener("click", (event) => {
 });
 $("#cartButton").addEventListener("click", openDrawer);
 $("#addProductButton").addEventListener("click", () => openModal("#productModal"));
-$("#logoutButton").addEventListener("click", () => {
+$("#logoutButton").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut();
   adminAuthenticated = false;
-  sessionStorage.removeItem("gitz-admin-auth");
   renderAdminAccess();
   showToast("You have been securely logged out");
 });
-$("#adminLoginForm").addEventListener("submit", (event) => {
+$("#adminLoginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
-  const valid = data.get("username") === ADMIN_USERNAME && data.get("password") === ADMIN_PASSWORD;
-  if (!valid) {
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: data.get("username"), password: data.get("password")
+  });
+  if (error) {
     $("#loginError").classList.remove("hidden");
     return;
   }
   adminAuthenticated = true;
-  sessionStorage.setItem("gitz-admin-auth", "true");
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   $("#loginError").classList.add("hidden");
   event.target.reset();
@@ -131,24 +166,40 @@ $("#productImage").addEventListener("change", (event) => {
   reader.readAsDataURL(file);
 });
 $("#clearNotifications").addEventListener("click", () => { notifications = []; saveNotifications(); renderAdmin(); showToast("Notifications cleared"); });
-$("#productForm").addEventListener("submit", (event) => {
+$("#productForm").addEventListener("submit", async (event) => {
   event.preventDefault(); const data = new FormData(event.target);
   const image = $("#imagePreview").src || "";
-  products.unshift({ id: Date.now(), name: data.get("name"), category: data.get("category"), price: Number(data.get("price")), stock: Number(data.get("stock")), icon: data.get("icon") || "✦", image, description: data.get("description") || "A thoughtful everyday essential." });
-  save(); renderProducts(); renderAdmin(); closeModal("#productModal"); event.target.reset(); $("#imagePreview").src = ""; $("#imagePreview").classList.add("hidden"); showToast("Product added to your catalog");
+  const product = { name: data.get("name"), category: data.get("category"), price: Number(data.get("price")), stock: Number(data.get("stock")), icon: data.get("icon") || "✦", image, description: data.get("description") || "A thoughtful everyday essential." };
+  try {
+    const created = await createRemoteProduct(product, data.get("image"));
+    products.unshift(created);
+    save(); renderProducts(); renderAdmin(); closeModal("#productModal"); event.target.reset(); $("#imagePreview").src = ""; $("#imagePreview").classList.add("hidden"); showToast("Product added to your catalog");
+  } catch (error) { console.error("Product creation failed.", error); showToast("Could not add the product."); }
 });
 $("#checkoutButton").addEventListener("click", () => { if (cart.length) { closeDrawer(); openModal("#checkoutModal"); } });
-$("#checkoutForm").addEventListener("submit", (event) => {
+$("#checkoutForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
   const customer = data.get("name");
   const orderTotal = cartTotal();
-  cart.forEach((item) => { const product = products.find((p) => p.id === item.id); if (product) product.stock -= item.quantity; });
-  orders.push({ id: Date.now(), total: orderTotal, customer, phone: data.get("phone"), date: new Date().toISOString() });
-  notifications.unshift({ id: Date.now(), total: orderTotal, customer, date: new Date().toISOString() });
+  const order = { total: orderTotal, customer, phone: data.get("phone"), email: data.get("email"), address: data.get("address"), city: data.get("city"), postal: data.get("postal") };
+  try {
+    await createRemoteOrder(order, cart);
+    for (const item of cart) {
+      const product = productById(item.id);
+      if (product) { product.stock -= item.quantity; await updateRemoteProduct(product.id, { stock: product.stock }); }
+    }
+    orders.unshift({ ...order, id: Date.now(), date: new Date().toISOString() });
+    notifications.unshift({ id: Date.now(), total: orderTotal, customer, date: new Date().toISOString() });
+  } catch (error) { console.error("Order submission failed.", error); showToast("Could not place the order. Please try again."); return; }
   saveNotifications();
   cart = []; save(); renderProducts(); renderAdmin(); renderCart(); closeModal("#checkoutModal"); event.target.reset();
   if ("Notification" in window && Notification.permission === "granted") new Notification("New Gitz Store order", { body: `${customer} placed an order for ${money(orderTotal)}.` });
   showToast(`M-Pesa prompt sent to ${data.get("phone")}. Enter your PIN on your phone to pay.`);
 });
 renderProducts(); renderAdminAccess(); renderCart();
+refreshFromBackend();
+supabaseClient.auth.getSession().then(({ data }) => {
+  adminAuthenticated = Boolean(data.session);
+  renderAdminAccess();
+});
