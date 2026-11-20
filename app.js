@@ -321,8 +321,9 @@ $("#checkoutForm").addEventListener("submit", async (event) => {
   const customer = data.get("name");
   const orderTotal = cartTotal();
   const order = { total: orderTotal, customer, phone: data.get("phone"), email: data.get("email"), address: data.get("address"), city: data.get("city"), postal: data.get("postal") };
+  let savedOrder;
   try {
-    await createRemoteOrder(order, cart);
+    savedOrder = await createRemoteOrder(order, cart);
     for (const item of cart) {
       const product = productById(item.id);
       if (product) { product.stock -= item.quantity; await updateRemoteProduct(product.id, { stock: product.stock }); }
@@ -331,9 +332,24 @@ $("#checkoutForm").addEventListener("submit", async (event) => {
     notifications.unshift({ id: Date.now(), total: orderTotal, customer, date: new Date().toISOString() });
   } catch (error) { console.error("Order submission failed.", error); showToast("Could not place the order. Please try again."); return; }
   saveNotifications();
+  const orderItems = cart.map((item) => `• ${item.name} × ${item.quantity} — ${money(item.price * item.quantity)}`);
+  const whatsappMessage = [
+    "Hello Gitz Store, I would like to place this order:",
+    "",
+    ...orderItems,
+    "",
+    `Total: ${money(orderTotal)}`,
+    `Order reference: ${savedOrder.id}`,
+    `Name: ${order.customer}`,
+    `Phone: ${order.phone}`,
+    `Email: ${order.email}`,
+    `Delivery address: ${order.address}, ${order.city}, ${order.postal}`,
+    "",
+    "Please guide me on how to pay via M-Pesa."
+  ].join("\n");
   cart = []; save(); renderProducts(); renderAdmin(); renderCart(); closeModal("#checkoutModal"); event.target.reset();
   if ("Notification" in window && Notification.permission === "granted") new Notification("New Gitz Store order", { body: `${customer} placed an order for ${money(orderTotal)}.` });
-  showToast(`M-Pesa prompt sent to ${data.get("phone")}. Enter your PIN on your phone to pay.`);
+  window.location.assign(`https://wa.me/254799934199?text=${encodeURIComponent(whatsappMessage)}`);
 });
 renderProducts(); renderAdminAccess(); renderCart();
 refreshFromBackend();
