@@ -21,7 +21,9 @@ let orders = JSON.parse(localStorage.getItem("gitz-orders") || "[]");
 let notifications = JSON.parse(localStorage.getItem("gitz-notifications") || "[]");
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `KSh ${Number(value).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
+const AUTH_REDIRECT_URL = "https://cruise1601.github.io/gitz-store-isiolo/";
 let adminAuthenticated = false;
+let passwordRecoveryMode = false;
 let editingProductId = null;
 let selectedProductImage = null;
 let imagePreviewUrl = null;
@@ -65,9 +67,21 @@ function renderAdmin() {
   $("#emptyAdmin").classList.toggle("hidden", products.length > 0);
 }
 function renderAdminAccess() {
-  $("#adminLogin").classList.toggle("hidden", adminAuthenticated);
-  $("#adminDashboard").classList.toggle("hidden", !adminAuthenticated);
-  if (adminAuthenticated) renderAdmin();
+  $("#adminLogin").classList.toggle("hidden", adminAuthenticated && !passwordRecoveryMode);
+  $("#adminDashboard").classList.toggle("hidden", !adminAuthenticated || passwordRecoveryMode);
+  if (adminAuthenticated && !passwordRecoveryMode) renderAdmin();
+}
+function showPasswordRecovery() {
+  passwordRecoveryMode = true;
+  adminAuthenticated = false;
+  $("#storeView").classList.add("hidden");
+  $("#adminView").classList.remove("hidden");
+  $("#adminLogin").classList.remove("hidden");
+  $("#adminDashboard").classList.add("hidden");
+  $("#adminLoginForm").classList.add("hidden");
+  $("#passwordRecoveryForm").classList.remove("hidden");
+  document.querySelectorAll(".nav-link").forEach((button) => button.classList.toggle("active", button.dataset.view === "admin"));
+  window.history.replaceState({}, document.title, window.location.pathname);
 }
 function cartCount() { return cart.reduce((sum, item) => sum + item.quantity, 0); }
 function cartTotal() { return cart.reduce((sum, item) => sum + item.price * item.quantity, 0); }
@@ -191,11 +205,54 @@ $("#adminLoginForm").addEventListener("submit", async (event) => {
     return;
   }
   adminAuthenticated = true;
+  passwordRecoveryMode = false;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   $("#loginError").classList.add("hidden");
+  $("#passwordResetMessage").classList.add("hidden");
   event.target.reset();
   renderAdminAccess();
   showToast("Welcome to the admin dashboard");
+});
+$("#forgotPasswordButton").addEventListener("click", async () => {
+  const emailInput = $("#adminEmail");
+  if (!emailInput.value || !emailInput.checkValidity()) {
+    emailInput.reportValidity();
+    return;
+  }
+  const button = $("#forgotPasswordButton");
+  button.disabled = true;
+  $("#loginError").classList.add("hidden");
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(emailInput.value.trim(), {
+    redirectTo: AUTH_REDIRECT_URL
+  });
+  button.disabled = false;
+  if (error) {
+    $("#loginError").textContent = error.message;
+    $("#loginError").classList.remove("hidden");
+    return;
+  }
+  $("#passwordResetMessage").textContent = "If that admin account exists, Supabase has sent a password reset email.";
+  $("#passwordResetMessage").classList.remove("hidden");
+});
+$("#passwordRecoveryForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const password = new FormData(event.target).get("newPassword");
+  const { error } = await supabaseClient.auth.updateUser({ password });
+  if (error) {
+    $("#passwordRecoveryError").textContent = error.message;
+    $("#passwordRecoveryError").classList.remove("hidden");
+    return;
+  }
+  passwordRecoveryMode = false;
+  adminAuthenticated = true;
+  $("#passwordRecoveryForm").classList.add("hidden");
+  $("#adminLoginForm").classList.remove("hidden");
+  event.target.reset();
+  renderAdminAccess();
+  showToast("Password updated successfully.");
+});
+supabaseClient.auth.onAuthStateChange((event) => {
+  if (event === "PASSWORD_RECOVERY") showPasswordRecovery();
 });
 $("#searchInput").addEventListener("input", renderProducts);
 $("#categoryFilter").addEventListener("change", renderProducts);
@@ -276,6 +333,6 @@ $("#checkoutForm").addEventListener("submit", async (event) => {
 renderProducts(); renderAdminAccess(); renderCart();
 refreshFromBackend();
 supabaseClient.auth.getSession().then(({ data }) => {
-  adminAuthenticated = Boolean(data.session);
+  if (!passwordRecoveryMode) adminAuthenticated = Boolean(data.session);
   renderAdminAccess();
 });
