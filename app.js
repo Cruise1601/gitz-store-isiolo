@@ -222,34 +222,39 @@ $("#forgotPasswordButton").addEventListener("click", async () => {
   const button = $("#forgotPasswordButton");
   button.disabled = true;
   $("#loginError").classList.add("hidden");
-  const { error } = await supabaseClient.auth.resetPasswordForEmail(emailInput.value.trim(), {
-    redirectTo: AUTH_REDIRECT_URL
-  });
-  button.disabled = false;
-  if (error) {
-    $("#loginError").textContent = error.message;
+  try {
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(emailInput.value.trim(), {
+      redirectTo: AUTH_REDIRECT_URL
+    });
+    if (error) throw error;
+    $("#passwordResetMessage").textContent = "If that admin account exists, Supabase has sent a password reset email.";
+    $("#passwordResetMessage").classList.remove("hidden");
+  } catch (error) {
+    console.error("Password reset request failed.", error);
+    $("#loginError").textContent = error.message || "Could not send the password reset email.";
     $("#loginError").classList.remove("hidden");
-    return;
+  } finally {
+    button.disabled = false;
   }
-  $("#passwordResetMessage").textContent = "If that admin account exists, Supabase has sent a password reset email.";
-  $("#passwordResetMessage").classList.remove("hidden");
 });
 $("#passwordRecoveryForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const password = new FormData(event.target).get("newPassword");
-  const { error } = await supabaseClient.auth.updateUser({ password });
-  if (error) {
+  try {
+    const { error } = await supabaseClient.auth.updateUser({ password });
+    if (error) throw error;
+    passwordRecoveryMode = false;
+    adminAuthenticated = true;
+    $("#passwordRecoveryForm").classList.add("hidden");
+    $("#adminLoginForm").classList.remove("hidden");
+    event.target.reset();
+    renderAdminAccess();
+    showToast("Password updated successfully.");
+  } catch (error) {
+    console.error("Password update failed.", error);
     $("#passwordRecoveryError").textContent = error.message;
     $("#passwordRecoveryError").classList.remove("hidden");
-    return;
   }
-  passwordRecoveryMode = false;
-  adminAuthenticated = true;
-  $("#passwordRecoveryForm").classList.add("hidden");
-  $("#adminLoginForm").classList.remove("hidden");
-  event.target.reset();
-  renderAdminAccess();
-  showToast("Password updated successfully.");
 });
 supabaseClient.auth.onAuthStateChange((event) => {
   if (event === "PASSWORD_RECOVERY") showPasswordRecovery();
