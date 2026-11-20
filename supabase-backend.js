@@ -19,14 +19,57 @@ async function loadRemoteProducts() {
   return data.map(remoteProduct);
 }
 
+async function uploadProductImage(imageFile) {
+  let imageBitmap;
+  if ("createImageBitmap" in window) {
+    imageBitmap = await createImageBitmap(imageFile);
+  } else {
+    const sourceUrl = URL.createObjectURL(imageFile);
+    try {
+      imageBitmap = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Unable to read the product photo."));
+        image.src = sourceUrl;
+      });
+    } finally {
+      URL.revokeObjectURL(sourceUrl);
+    }
+  }
+  const aspectRatio = 4 / 3;
+  const imageWidth = imageBitmap.width || imageBitmap.naturalWidth;
+  const imageHeight = imageBitmap.height || imageBitmap.naturalHeight;
+  const cropWidth = imageWidth > imageHeight * aspectRatio ? imageHeight * aspectRatio : imageWidth;
+  const cropHeight = cropWidth / aspectRatio;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 900;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to prepare the product photo.");
+  context.drawImage(
+    imageBitmap,
+    (imageWidth - cropWidth) / 2,
+    (imageHeight - cropHeight) / 2,
+    cropWidth,
+    cropHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  if (typeof imageBitmap.close === "function") imageBitmap.close();
+  const imageBlob = await new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Unable to process the product photo.")), "image/jpeg", 0.86);
+  });
+  const path = `${crypto.randomUUID()}.jpg`;
+  const upload = await supabaseClient.storage.from("product-images").upload(path, imageBlob, { contentType: "image/jpeg", upsert: false });
+  if (upload.error) throw upload.error;
+  return supabaseClient.storage.from("product-images").getPublicUrl(path).data.publicUrl;
+}
+
 async function createRemoteProduct(product, imageFile) {
   let imageUrl = "";
-  if (imageFile) {
-    const path = `${crypto.randomUUID()}-${imageFile.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
-    const upload = await supabaseClient.storage.from("product-images").upload(path, imageFile, { upsert: false });
-    if (upload.error) throw upload.error;
-    imageUrl = supabaseClient.storage.from("product-images").getPublicUrl(path).data.publicUrl;
-  }
+  if (imageFile) imageUrl = await uploadProductImage(imageFile);
   const { data, error } = await supabaseClient.from("products").insert({
     name: product.name, category: product.category, price: product.price,
     stock: product.stock, icon: product.icon, description: product.description, image_url: imageUrl
@@ -35,8 +78,10 @@ async function createRemoteProduct(product, imageFile) {
   return remoteProduct(data);
 }
 
-async function updateRemoteProduct(id, values) {
-  const { data, error } = await supabaseClient.from("products").update(values).eq("id", id).select().single();
+async function updateRemoteProduct(id, values, imageFile) {
+  const updatedValues = { ...values };
+  if (imageFile) updatedValues.image_url = await uploadProductImage(imageFile);
+  const { data, error } = await supabaseClient.from("products").update(updatedValues).eq("id", id).select().single();
   if (error) throw error;
   return remoteProduct(data);
 }

@@ -22,6 +22,9 @@ let notifications = JSON.parse(localStorage.getItem("gitz-notifications") || "[]
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `KSh ${Number(value).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
 let adminAuthenticated = false;
+let editingProductId = null;
+let selectedProductImage = null;
+let imagePreviewUrl = null;
 const save = () => { localStorage.setItem("gitz-products", JSON.stringify(products)); localStorage.setItem("gitz-cart", JSON.stringify(cart)); };
 const saveNotifications = () => localStorage.setItem("gitz-notifications", JSON.stringify(notifications));
 const productVisual = (product, className = "") => product.image ? `<img class="${className}" src="${product.image}" alt="${product.name}" />` : (product.icon || "✦");
@@ -56,7 +59,7 @@ function renderAdmin() {
   $("#totalProducts").textContent = products.length;
   $("#totalOrders").textContent = orders.length;
   $("#catalogValue").textContent = money(products.reduce((sum, p) => sum + p.price * p.stock, 0));
-  $("#adminProductRows").innerHTML = products.map((p) => `<tr><td><div class="table-product"><span class="table-product-icon">${productVisual(p, "table-product-photo")}</span>${p.name}</div></td><td>${p.category}</td><td>${money(p.price)}</td><td><div class="stock-editor"><input type="number" min="0" step="1" value="${p.stock}" data-stock="${p.id}" aria-label="Stock for ${p.name}" /><button class="save-stock-button" data-save-stock="${p.id}">Save</button></div></td><td><button class="delete-button" data-delete="${p.id}">Remove</button></td></tr>`).join("");
+  $("#adminProductRows").innerHTML = products.map((p) => `<tr><td><div class="table-product"><span class="table-product-icon">${productVisual(p, "table-product-photo")}</span>${p.name}</div></td><td>${p.category}</td><td>${money(p.price)}</td><td><div class="stock-editor"><input type="number" min="0" step="1" value="${p.stock}" data-stock="${p.id}" aria-label="Stock for ${p.name}" /><button class="save-stock-button" data-save-stock="${p.id}">Save</button></div></td><td><div class="product-actions"><button class="edit-button" data-edit-product="${p.id}">Edit details</button><button class="delete-button" data-delete="${p.id}">Remove</button></div></td></tr>`).join("");
   $("#notificationCount").textContent = notifications.length;
   $("#orderNotifications").innerHTML = notifications.length ? notifications.map((notification) => `<div class="order-notification"><span class="notification-icon">🛍</span><div><strong>New order received</strong><p>${notification.customer} • ${money(notification.total)} via M-Pesa</p><small>${new Date(notification.date).toLocaleString("en-KE")}</small></div></div>`).join("") : '<p class="muted-copy">New orders will appear here.</p>';
   $("#emptyAdmin").classList.toggle("hidden", products.length > 0);
@@ -80,6 +83,34 @@ function openDrawer() { $("#cartDrawer").classList.add("open"); $("#cartDrawer")
 function closeDrawer() { $("#cartDrawer").classList.remove("open"); $("#cartDrawer").setAttribute("aria-hidden", "true"); }
 function openModal(id) { $(id).classList.remove("hidden"); }
 function closeModal(id) { $(id).classList.add("hidden"); }
+function clearProductImagePreview() {
+  if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  imagePreviewUrl = null;
+  selectedProductImage = null;
+  $("#imagePreview").removeAttribute("src");
+  $("#imagePreview").classList.add("hidden");
+}
+function openProductEditor(product = null) {
+  const form = $("#productForm");
+  form.reset();
+  clearProductImagePreview();
+  editingProductId = product ? product.id : null;
+  $("#productModalTitle").textContent = product ? "Edit product details" : "Add a new product";
+  $("#saveProductButton").innerHTML = product ? "Save product changes <span>→</span>" : "Add product <span>→</span>";
+  if (product) {
+    form.elements.name.value = product.name;
+    form.elements.category.value = product.category;
+    form.elements.price.value = product.price;
+    form.elements.stock.value = product.stock;
+    form.elements.icon.value = product.icon || "";
+    form.elements.description.value = product.description || "";
+    if (product.image) {
+      $("#imagePreview").src = product.image;
+      $("#imagePreview").classList.remove("hidden");
+    }
+  }
+  openModal("#productModal");
+}
 
 document.addEventListener("click", async (event) => {
   const viewButton = event.target.closest("[data-view]");
@@ -97,6 +128,11 @@ document.addEventListener("click", async (event) => {
     if (existing) { if (existing.quantity < product.stock) existing.quantity++; else return showToast("That’s all the stock we have."); }
     else cart.push({ ...product, quantity: 1 });
     save(); renderCart(); showToast(`${product.name} added to cart`);
+  }
+  const editProduct = event.target.closest("[data-edit-product]");
+  if (editProduct) {
+    const product = productById(editProduct.dataset.editProduct);
+    if (product) openProductEditor(product);
   }
   const remove = event.target.closest("[data-delete]");
   if (remove) {
@@ -127,12 +163,17 @@ document.addEventListener("click", async (event) => {
   const removeCart = event.target.closest("[data-remove-cart]");
   if (removeCart) { cart = cart.filter((item) => String(item.id) !== String(removeCart.dataset.removeCart)); save(); renderCart(); }
   if (event.target.closest("[data-close-cart]")) closeDrawer();
-  if (event.target.closest("[data-close-modal]")) closeModal("#productModal");
+  if (event.target.closest("[data-close-modal]")) {
+    closeModal("#productModal");
+    $("#productForm").reset();
+    clearProductImagePreview();
+    editingProductId = null;
+  }
   if (event.target.closest("[data-close-checkout]")) closeModal("#checkoutModal");
   if (event.target.closest("[data-scroll-products]")) $("#productsSection").scrollIntoView({ behavior: "smooth" });
 });
 $("#cartButton").addEventListener("click", openDrawer);
-$("#addProductButton").addEventListener("click", () => openModal("#productModal"));
+$("#addProductButton").addEventListener("click", () => openProductEditor());
 $("#logoutButton").addEventListener("click", async () => {
   await supabaseClient.auth.signOut();
   adminAuthenticated = false;
@@ -158,23 +199,58 @@ $("#adminLoginForm").addEventListener("submit", async (event) => {
 });
 $("#searchInput").addEventListener("input", renderProducts);
 $("#categoryFilter").addEventListener("change", renderProducts);
-$("#productImage").addEventListener("change", (event) => {
+function previewProductImage(event) {
   const file = event.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => { $("#imagePreview").src = reader.result; $("#imagePreview").classList.remove("hidden"); };
-  reader.readAsDataURL(file);
-});
+  event.target.value = "";
+  clearProductImagePreview();
+  selectedProductImage = file;
+  imagePreviewUrl = URL.createObjectURL(file);
+  $("#imagePreview").src = imagePreviewUrl;
+  $("#imagePreview").classList.remove("hidden");
+}
+$("#productImage").addEventListener("change", previewProductImage);
+$("#productCamera").addEventListener("change", previewProductImage);
 $("#clearNotifications").addEventListener("click", () => { notifications = []; saveNotifications(); renderAdmin(); showToast("Notifications cleared"); });
 $("#productForm").addEventListener("submit", async (event) => {
   event.preventDefault(); const data = new FormData(event.target);
-  const image = $("#imagePreview").src || "";
-  const product = { name: data.get("name"), category: data.get("category"), price: Number(data.get("price")), stock: Number(data.get("stock")), icon: data.get("icon") || "✦", image, description: data.get("description") || "A thoughtful everyday essential." };
+  const productValues = {
+    name: data.get("name"),
+    category: data.get("category"),
+    price: Number(data.get("price")),
+    stock: Number(data.get("stock")),
+    icon: data.get("icon") || "✦",
+    description: data.get("description") || "A thoughtful everyday essential."
+  };
   try {
-    const created = await createRemoteProduct(product, data.get("image"));
-    products.unshift(created);
-    save(); renderProducts(); renderAdmin(); closeModal("#productModal"); event.target.reset(); $("#imagePreview").src = ""; $("#imagePreview").classList.add("hidden"); showToast("Product added to your catalog");
-  } catch (error) { console.error("Product creation failed.", error); showToast("Could not add the product."); }
+    if (editingProductId !== null) {
+      const currentProduct = productById(editingProductId);
+      const updatedProduct = await updateRemoteProduct(editingProductId, {
+        name: productValues.name,
+        category: productValues.category,
+        price: productValues.price,
+        stock: productValues.stock,
+        icon: productValues.icon,
+        description: productValues.description
+      }, selectedProductImage);
+      products = products.map((product) => product.id === editingProductId ? updatedProduct : product);
+      cart = cart.map((item) => item.id === updatedProduct.id ? { ...updatedProduct, quantity: Math.min(item.quantity, updatedProduct.stock) } : item).filter((item) => item.quantity > 0);
+      save(); renderProducts(); renderAdmin(); renderCart();
+      showToast(`Updated ${currentProduct.name}`);
+    } else {
+      const created = await createRemoteProduct(productValues, selectedProductImage);
+      products.unshift(created);
+      save(); renderProducts(); renderAdmin();
+      showToast("Product added to your catalog");
+    }
+    closeModal("#productModal");
+    event.target.reset();
+    clearProductImagePreview();
+    editingProductId = null;
+  } catch (error) {
+    console.error("Product save failed.", error);
+    showToast("Could not save product changes.");
+  }
 });
 $("#checkoutButton").addEventListener("click", () => { if (cart.length) { closeDrawer(); openModal("#checkoutModal"); } });
 $("#checkoutForm").addEventListener("submit", async (event) => {
