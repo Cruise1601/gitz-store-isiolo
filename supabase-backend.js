@@ -107,8 +107,39 @@ async function createRemoteOrder(order, items) {
 async function loadRemoteOrders() {
   const { data, error } = await supabaseClient.from("orders").select("*").order("created_at", { ascending: false });
   if (error) throw error;
+  if (!data.length) return [];
+  const { data: itemData, error: itemError } = await supabaseClient
+    .from("order_items")
+    .select("*")
+    .in("order_id", data.map((order) => order.id));
+  if (itemError) throw itemError;
   return data.map((order) => ({
-    id: order.id, total: Number(order.total), customer: order.customer_name,
-    phone: order.phone, email: order.email, date: order.created_at
+    id: order.id,
+    total: Number(order.total),
+    customer: order.customer_name,
+    phone: order.phone,
+    email: order.email,
+    address: order.address,
+    city: order.city,
+    postal: order.postal,
+    date: order.created_at,
+    status: order.payment_status || "pending",
+    confirmedAt: order.confirmed_at || null,
+    items: itemData.filter((item) => item.order_id === order.id).map((item) => ({
+      name: item.product_name,
+      price: Number(item.price),
+      quantity: item.quantity
+    }))
   }));
+}
+
+async function updateRemoteOrderStatus(id, status, confirmedAt) {
+  const { data, error } = await supabaseClient
+    .from("orders")
+    .update({ payment_status: status, confirmed_at: confirmedAt })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }

@@ -21,6 +21,9 @@ let orders = JSON.parse(localStorage.getItem("gitz-orders") || "[]");
 let notifications = JSON.parse(localStorage.getItem("gitz-notifications") || "[]");
 const $ = (selector) => document.querySelector(selector);
 const money = (value) => `KSh ${Number(value).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`;
+const htmlEscape = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+})[character]);
 const AUTH_REDIRECT_URL = "https://cruise1601.github.io/gitz-store-isiolo/";
 let adminAuthenticated = false;
 let passwordRecoveryMode = false;
@@ -43,18 +46,18 @@ async function refreshFromBackend() {
   try {
     const remoteProducts = await loadRemoteProducts();
     if (remoteProducts.length) products = remoteProducts;
-    try {
+    if (adminAuthenticated) {
       orders = await loadRemoteOrders();
-      notifications = orders.map((order) => ({ id: order.id, total: order.total, customer: order.customer, date: order.date }));
-    } catch (orderError) {
-      console.error("Could not load shared orders.", orderError);
+      notifications = orders.map((order) => ({ ...order }));
+      saveNotifications();
     }
     save();
-    saveNotifications();
     renderProducts(); renderAdminAccess(); renderCart();
+    return true;
   } catch (error) {
     console.error("Could not load the shared store data.", error);
     showToast("Shared store data is unavailable. Showing cached products.");
+    return false;
   }
 }
 function renderAdmin() {
@@ -62,8 +65,13 @@ function renderAdmin() {
   $("#totalOrders").textContent = orders.length;
   $("#catalogValue").textContent = money(products.reduce((sum, p) => sum + p.price * p.stock, 0));
   $("#adminProductRows").innerHTML = products.map((p) => `<tr><td><div class="table-product"><span class="table-product-icon">${productVisual(p, "table-product-photo")}</span>${p.name}</div></td><td>${p.category}</td><td>${money(p.price)}</td><td><div class="stock-editor"><input type="number" min="0" step="1" value="${p.stock}" data-stock="${p.id}" aria-label="Stock for ${p.name}" /><button class="save-stock-button" data-save-stock="${p.id}">Save</button></div></td><td><div class="product-actions"><button class="edit-button" data-edit-product="${p.id}">Edit details</button><button class="delete-button" data-delete="${p.id}">Remove</button></div></td></tr>`).join("");
-  $("#notificationCount").textContent = notifications.length;
-  $("#orderNotifications").innerHTML = notifications.length ? notifications.map((notification) => `<div class="order-notification"><span class="notification-icon">🛍</span><div><strong>New order received</strong><p>${notification.customer} • ${money(notification.total)} via M-Pesa</p><small>${new Date(notification.date).toLocaleString("en-KE")}</small></div></div>`).join("") : '<p class="muted-copy">New orders will appear here.</p>';
+  const pendingCount = notifications.filter((notification) => notification.status !== "confirmed").length;
+  $("#notificationCount").textContent = pendingCount;
+  $("#orderNotifications").innerHTML = notifications.length ? notifications.map((notification) => {
+    const confirmed = notification.status === "confirmed";
+    const itemSummary = (notification.items || []).map((item) => `${item.name} × ${item.quantity}`).join(", ");
+    return `<article class="order-notification"><span class="notification-icon">${confirmed ? "✓" : "🛍"}</span><div class="order-notification-copy"><strong>${confirmed ? "Payment confirmed" : "Pending order"}</strong><p>${htmlEscape(notification.customer)} • ${money(notification.total)}</p><p>${htmlEscape(itemSummary || "Order items unavailable")}</p><small>${new Date(notification.date).toLocaleString("en-KE")}</small><button class="edit-button review-order-button" data-review-order="${htmlEscape(notification.id)}">Review order</button></div></article>`;
+  }).join("") : '<p class="muted-copy">New orders will appear here.</p>';
   $("#emptyAdmin").classList.toggle("hidden", products.length > 0);
 }
 function renderAdminAccess() {
@@ -97,6 +105,60 @@ function openDrawer() { $("#cartDrawer").classList.add("open"); $("#cartDrawer")
 function closeDrawer() { $("#cartDrawer").classList.remove("open"); $("#cartDrawer").setAttribute("aria-hidden", "true"); }
 function openModal(id) { $(id).classList.remove("hidden"); }
 function closeModal(id) { $(id).classList.add("hidden"); }
+function receiptNumber(order) { return `GZ-${String(order.id).replace(/-/g, "").toUpperCase()}`; }
+function receiptWhatsAppUrl(order) {
+  const digits = String(order.phone || "").replace(/\D/g, "");
+  const phone = digits.startsWith("0") ? `254${digits.slice(1)}` : digits.startsWith("254") ? digits : `254${digits}`;
+  if (!/^254[17]\d{8}$/.test(phone)) return null;
+  const items = (order.items || []).map((item) => `- ${item.name} x ${item.quantity}: ${money(item.price * item.quantity)}`);
+  const message = [
+    "GITZ STORE — PAYMENT RECEIPT",
+    `Receipt: ${receiptNumber(order)}`,
+    `Order: ${order.id}`,
+    `Date: ${new Date(order.confirmedAt || order.date).toLocaleString("en-KE")}`,
+    `Customer: ${order.customer}`,
+    `Delivery: ${[order.address, order.city, order.postal].filter(Boolean).join(", ")}`,
+    "",
+    "Items:",
+    ...(items.length ? items : ["- Order items unavailable"]),
+    "",
+    `TOTAL PAID: ${money(order.total)}`,
+    "Payment confirmed by Gitz Store. Thank you for shopping with us."
+  ].join("\n");
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
+function openOrderReview(orderId) {
+  const order = orders.find((item) => String(item.id) === String(orderId));
+  if (!order) return showToast("That order could not be found. Refresh the orders and try again.");
+  const confirmed = order.status === "confirmed";
+  const items = order.items || [];
+  $("#orderReviewModal").dataset.orderId = order.id;
+  $("#orderReviewTitle").textContent = confirmed ? "Confirmed order receipt" : "Review pending order";
+  $("#orderReviewDetails").innerHTML = `
+    <div class="review-order-meta">
+      <p><span>Order reference</span><strong>${htmlEscape(order.id)}</strong></p>
+      <p><span>Customer</span><strong>${htmlEscape(order.customer)}</strong></p>
+      <p><span>Phone</span><strong>${htmlEscape(order.phone)}</strong></p>
+      <p><span>Email</span><strong>${htmlEscape(order.email)}</strong></p>
+      <p><span>Delivery address</span><strong>${htmlEscape([order.address, order.city, order.postal].filter(Boolean).join(", "))}</strong></p>
+      <p><span>Status</span><strong class="${confirmed ? "order-status-confirmed" : "order-status-pending"}">${confirmed ? "Payment confirmed" : "Pending payment"}</strong></p>
+    </div>
+    <div class="review-order-items"><strong>Items</strong>
+      ${items.length ? items.map((item) => `<p><span>${htmlEscape(item.name)} × ${htmlEscape(item.quantity)}</span><strong>${money(item.price * item.quantity)}</strong></p>`).join("") : '<p class="muted-copy">Order item details are unavailable.</p>'}
+      <p class="review-order-total"><span>Total</span><strong>${money(order.total)}</strong></p>
+    </div>
+    ${confirmed ? `<div class="receipt-preview"><strong>Receipt ${receiptNumber(order)}</strong><p>Payment confirmed on ${htmlEscape(new Date(order.confirmedAt || order.date).toLocaleString("en-KE"))}.</p></div>` : ""}
+  `;
+  $("#orderReviewHint").textContent = confirmed
+    ? "The receipt is ready. WhatsApp opens with the receipt message; review it and press Send to deliver it."
+    : "Only confirm after you have verified the customer's payment. WhatsApp will open with a receipt message for you to send.";
+  $("#confirmOrderButton").classList.toggle("hidden", confirmed);
+  const receiptUrl = confirmed ? receiptWhatsAppUrl(order) : null;
+  $("#receiptWhatsAppLink").classList.toggle("hidden", !receiptUrl);
+  $("#receiptWhatsAppLink").href = receiptUrl || "#";
+  $("#receiptPhoneWarning").classList.toggle("hidden", !confirmed || Boolean(receiptUrl));
+  openModal("#orderReviewModal");
+}
 function clearProductImagePreview() {
   if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
   imagePreviewUrl = null;
@@ -184,6 +246,9 @@ document.addEventListener("click", async (event) => {
     editingProductId = null;
   }
   if (event.target.closest("[data-close-checkout]")) closeModal("#checkoutModal");
+  if (event.target.closest("[data-close-order-review]")) closeModal("#orderReviewModal");
+  const reviewOrder = event.target.closest("[data-review-order]");
+  if (reviewOrder) openOrderReview(reviewOrder.dataset.reviewOrder);
   if (event.target.closest("[data-scroll-products]")) $("#productsSection").scrollIntoView({ behavior: "smooth" });
 });
 $("#cartButton").addEventListener("click", openDrawer);
@@ -211,7 +276,8 @@ $("#adminLoginForm").addEventListener("submit", async (event) => {
   $("#passwordResetMessage").classList.add("hidden");
   event.target.reset();
   renderAdminAccess();
-  showToast("Welcome to the admin dashboard");
+  const refreshed = await refreshFromBackend();
+  showToast(refreshed ? "Welcome to the admin dashboard" : "Signed in, but shared store data could not be loaded.");
 });
 $("#forgotPasswordButton").addEventListener("click", async () => {
   const emailInput = $("#adminEmail");
@@ -259,6 +325,15 @@ $("#passwordRecoveryForm").addEventListener("submit", async (event) => {
 supabaseClient.auth.onAuthStateChange((event) => {
   if (event === "PASSWORD_RECOVERY") showPasswordRecovery();
 });
+supabaseClient.auth.getSession().then(({ data, error }) => {
+  if (error) {
+    console.error("Could not restore the admin session.", error);
+    return;
+  }
+  adminAuthenticated = Boolean(data.session);
+  renderAdminAccess();
+  if (adminAuthenticated) refreshFromBackend();
+});
 $("#searchInput").addEventListener("input", renderProducts);
 $("#categoryFilter").addEventListener("change", renderProducts);
 function previewProductImage(event) {
@@ -273,7 +348,38 @@ function previewProductImage(event) {
 }
 $("#productImage").addEventListener("change", previewProductImage);
 $("#productCamera").addEventListener("change", previewProductImage);
-$("#clearNotifications").addEventListener("click", () => { notifications = []; saveNotifications(); renderAdmin(); showToast("Notifications cleared"); });
+$("#clearNotifications").addEventListener("click", async () => {
+  if (await refreshFromBackend()) showToast("Orders refreshed");
+});
+$("#confirmOrderButton").addEventListener("click", async (event) => {
+  const orderId = $("#orderReviewModal").dataset.orderId;
+  const order = orders.find((item) => String(item.id) === String(orderId));
+  if (!order || order.status === "confirmed") return;
+  if (!confirm("Confirm this payment only after you have verified that it was received. Continue?")) return;
+  const button = event.currentTarget;
+  const whatsappWindow = window.open("about:blank", "_blank");
+  button.disabled = true;
+  try {
+    const confirmedAt = new Date().toISOString();
+    await updateRemoteOrderStatus(order.id, "confirmed", confirmedAt);
+    order.status = "confirmed";
+    order.confirmedAt = confirmedAt;
+    notifications = orders.map((item) => ({ ...item }));
+    saveNotifications();
+    renderAdmin();
+    openOrderReview(order.id);
+    const receiptUrl = receiptWhatsAppUrl(order);
+    if (receiptUrl && whatsappWindow) whatsappWindow.location.replace(receiptUrl);
+    else if (whatsappWindow) whatsappWindow.close();
+    showToast(receiptUrl ? "Payment confirmed. Review and send the receipt in WhatsApp." : "Payment confirmed, but the customer's phone number needs correction before WhatsApp delivery.");
+  } catch (error) {
+    if (whatsappWindow) whatsappWindow.close();
+    console.error("Order confirmation failed.", error);
+    showToast("Could not confirm the order. Check that the Supabase migration has been applied.");
+  } finally {
+    button.disabled = false;
+  }
+});
 $("#productForm").addEventListener("submit", async (event) => {
   event.preventDefault(); const data = new FormData(event.target);
   const productValues = {
@@ -328,8 +434,15 @@ $("#checkoutForm").addEventListener("submit", async (event) => {
       const product = productById(item.id);
       if (product) { product.stock -= item.quantity; await updateRemoteProduct(product.id, { stock: product.stock }); }
     }
-    orders.unshift({ ...order, id: Date.now(), date: new Date().toISOString() });
-    notifications.unshift({ id: Date.now(), total: orderTotal, customer, date: new Date().toISOString() });
+    const localOrder = {
+      ...order,
+      id: savedOrder.id,
+      date: savedOrder.created_at,
+      status: savedOrder.payment_status || "pending",
+      items: cart.map((item) => ({ name: item.name, price: item.price, quantity: item.quantity }))
+    };
+    orders.unshift(localOrder);
+    notifications = orders.map((item) => ({ ...item }));
   } catch (error) { console.error("Order submission failed.", error); showToast("Could not place the order. Please try again."); return; }
   saveNotifications();
   const orderItems = cart.map((item) => `• ${item.name} × ${item.quantity} — ${money(item.price * item.quantity)}`);
